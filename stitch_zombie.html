@@ -28,7 +28,6 @@ const ctx    = canvas.getContext('2d');
 const W = canvas.width  = 860;
 const H = canvas.height = 620;
 
-// roundRect polyfill
 if (!CanvasRenderingContext2D.prototype.roundRect) {
   CanvasRenderingContext2D.prototype.roundRect = function(x,y,w,h,r){
     this.beginPath();
@@ -41,6 +40,122 @@ if (!CanvasRenderingContext2D.prototype.roundRect) {
   };
 }
 
+// ─── MUSIC (足球小將主題曲 — Web Audio API) ────────────────────────────────
+let audioCtx   = null;
+let musicMuted = false;
+let noteIndex  = 0;
+let nextNoteAt = 0;
+let musicStarted = false;
+
+const BPM = 126;
+const Q = 60/BPM, E = Q/2, H = Q*2, DQ = Q*1.5;
+
+// Captain Tsubasa main theme (燃えろ！キャプテン翼) approximation
+const MELODY = [
+  // ── Intro ──
+  {f:494,d:Q},{f:494,d:Q},{f:494,d:E},{f:440,d:E},{f:392,d:Q},
+  {f:440,d:Q},{f:494,d:Q},{f:587,d:H},
+  {f:494,d:Q},{f:440,d:Q},{f:392,d:Q},{f:440,d:Q},
+  {f:392,d:H},{f:0,d:Q},
+  // ── Phrase A ──
+  {f:587,d:Q},{f:587,d:Q},{f:587,d:E},{f:494,d:E},{f:440,d:Q},
+  {f:494,d:Q},{f:587,d:Q},{f:659,d:H},
+  {f:587,d:Q},{f:523,d:Q},{f:494,d:Q},{f:523,d:Q},
+  {f:494,d:H},{f:0,d:Q},
+  // ── Bridge (high energy) ──
+  {f:784,d:Q},{f:784,d:E},{f:740,d:E},{f:659,d:Q},{f:587,d:Q},
+  {f:659,d:Q},{f:740,d:Q},{f:784,d:H},
+  {f:880,d:Q},{f:784,d:E},{f:740,d:E},{f:659,d:H},
+  {f:0,d:Q},
+  // ── Rise ──
+  {f:494,d:Q},{f:523,d:Q},{f:587,d:Q},{f:659,d:Q},
+  {f:740,d:Q},{f:784,d:Q},{f:880,d:H},
+  {f:784,d:Q},{f:740,d:Q},{f:659,d:Q},{f:587,d:Q},
+  {f:392,d:H},{f:0,d:H},
+  // ── Phrase B repeat ──
+  {f:494,d:Q},{f:494,d:Q},{f:494,d:E},{f:440,d:E},{f:392,d:Q},
+  {f:440,d:Q},{f:494,d:Q},{f:587,d:H},
+  {f:523,d:Q},{f:494,d:E},{f:440,d:E},{f:392,d:Q},{f:330,d:Q},
+  {f:392,d:H*2},
+];
+
+// Simple bass line (root notes on beats 1&3)
+const BASS = [
+  {f:196,d:H},{f:196,d:H},{f:196,d:H},{f:196,d:H},
+  {f:220,d:H},{f:220,d:H},{f:196,d:H},{f:196,d:H},
+  {f:220,d:H},{f:220,d:H},{f:196,d:H},{f:196,d:H},
+  {f:220,d:H},{f:220,d:H},{f:165,d:H},{f:196,d:H*2},
+  {f:196,d:H},{f:196,d:H},{f:220,d:H},{f:220,d:H},
+  {f:294,d:H},{f:294,d:H},{f:220,d:H},{f:220,d:H*2},
+];
+
+function ensureAudio() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    nextNoteAt = audioCtx.currentTime + 0.05;
+    noteIndex  = 0;
+  }
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+
+function playOsc(freq, dur, startT, type, vol) {
+  const osc  = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.connect(gain); gain.connect(audioCtx.destination);
+  osc.type = type;
+  osc.frequency.value = freq;
+  gain.gain.setValueAtTime(vol, startT);
+  gain.gain.exponentialRampToValueAtTime(0.001, startT + dur * 0.88);
+  osc.start(startT);
+  osc.stop(startT + dur);
+}
+
+function schedulerTick() {
+  if (!audioCtx || musicMuted) return;
+  while (nextNoteAt < audioCtx.currentTime + 0.35) {
+    const note = MELODY[noteIndex % MELODY.length];
+    const bass = BASS[noteIndex % BASS.length];
+    if (note.f > 0) playOsc(note.f, note.d, nextNoteAt, 'square', 0.07);
+    if (bass.f > 0) playOsc(bass.f, bass.d, nextNoteAt, 'triangle', 0.05);
+    nextNoteAt += note.d;
+    noteIndex++;
+  }
+  setTimeout(schedulerTick, 80);
+}
+
+function startMusic() {
+  if (musicStarted) return;
+  musicStarted = true;
+  ensureAudio();
+  schedulerTick();
+}
+
+function playTrainSFX() {
+  if (!audioCtx) return;
+  // Low rumble + horn
+  const t = audioCtx.currentTime;
+  for (let i = 0; i < 4; i++) {
+    const osc  = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.type = 'sawtooth';
+    osc.frequency.value = 60 + i*15;
+    gain.gain.setValueAtTime(0, t + i*0.05);
+    gain.gain.linearRampToValueAtTime(0.12, t + 0.1 + i*0.05);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 1.2);
+    osc.start(t + i*0.05);
+    osc.stop(t + 1.5);
+  }
+  // Horn
+  const horn = audioCtx.createOscillator();
+  const hg   = audioCtx.createGain();
+  horn.connect(hg); hg.connect(audioCtx.destination);
+  horn.type = 'square'; horn.frequency.value = 440;
+  hg.gain.setValueAtTime(0.12, t+0.15);
+  hg.gain.exponentialRampToValueAtTime(0.001, t+0.6);
+  horn.start(t+0.15); horn.stop(t+0.7);
+}
+
 // ─── GUN DEFINITIONS ───────────────────────────────────────────────────────
 const GUNS = [
   { id:'pistol',  name:'手槍',    icon:'🔫', dmg:25,  rate:350,  spd:9,  spread:0,    cnt:1, col:'#cccccc', piercing:false, explosive:false },
@@ -48,6 +163,34 @@ const GUNS = [
   { id:'smg',     name:'衝鋒槍',  icon:'⚡', dmg:12,  rate:70,   spd:12, spread:0.06, cnt:1, col:'#00FF88', piercing:false, explosive:false },
   { id:'plasma',  name:'電漿槍',  icon:'🌀', dmg:60,  rate:480,  spd:7,  spread:0,    cnt:1, col:'#00FFFF', piercing:true,  explosive:false },
   { id:'rocket',  name:'火箭炮',  icon:'🚀', dmg:130, rate:1400, spd:5,  spread:0,    cnt:1, col:'#FF4500', piercing:false, explosive:true,  expR:95 },
+];
+
+// ─── TRAIN DEFINITIONS ─────────────────────────────────────────────────────
+const TRAIN_DEFS = [
+  {
+    name:'日本新幹線 N700S',
+    bodyCol:'#f4f4f4', stripeCol:'#003087', noseCol:'#e0e0e0',
+    windowCol:'rgba(140,210,255,0.75)', winFrame:'#b0b8c8',
+    speed:22, trainW:420, trainH:54, nosePt:70,
+  },
+  {
+    name:'香港高鐵 CR400AF',
+    bodyCol:'#f8f8f8', stripeCol:'#cc0000', noseCol:'#ddd',
+    windowCol:'rgba(140,210,255,0.75)', winFrame:'#b8b8b8',
+    speed:18, trainW:400, trainH:52, nosePt:65,
+  },
+  {
+    name:'香港動感號',
+    bodyCol:'#ff6b00', stripeCol:'#ffd000', noseCol:'#e05500',
+    windowCol:'rgba(255,230,130,0.7)', winFrame:'#cc5500',
+    speed:16, trainW:380, trainH:56, nosePt:55,
+  },
+  {
+    name:'高鐵復興號 CR400',
+    bodyCol:'#f5f5f5', stripeCol:'#c00000', noseCol:'#ddd',
+    windowCol:'rgba(140,210,255,0.75)', winFrame:'#b0b0b8',
+    speed:24, trainW:440, trainH:52, nosePt:75,
+  },
 ];
 
 // ─── UPGRADE POOL ──────────────────────────────────────────────────────────
@@ -63,29 +206,52 @@ const STAT_UPS = [
 ];
 
 // ─── GAME STATE ────────────────────────────────────────────────────────────
-let player, bullets, zombies, particles, explosions, levelOpts;
+let player, bullets, zombies, trains, particles, explosions, levelOpts;
 let totalKills = 0;
-let gameState  = 'start';  // start | playing | levelup | gameover
+let gameState  = 'start';
 let spawnTimer = 0;
 let keys = {}, mx = W/2, my = H/2, mdown = false;
 let shakeX = 0, shakeY = 0, shakeTmr = 0, shakeAmt = 0;
+let savedState = null;   // for retry-from-level
+let trainFlash = 0;      // special move activation flash timer
 
 function initPlayer() {
   player = {
     x:W/2, y:H/2, vx:0, vy:0,
     hp:100, maxHp:100,
     speed:3.5, angle:0,
-    kills:0, level:1, killsNeeded:50,
+    kills:0, level:1, killsNeeded:30,
     gunIdx:0, lastFire:0, iframes:0,
     dmgMult:1, rateMult:1, spdMult:1, extraBullets:0,
+    specialMoves:10, trainIdx:0,
   };
 }
 
 function startGame() {
   initPlayer();
-  bullets=[]; zombies=[]; particles=[]; explosions=[]; levelOpts=[];
-  totalKills=0; spawnTimer=0;
+  bullets=[]; zombies=[]; trains=[]; particles=[]; explosions=[]; levelOpts=[];
+  totalKills=0; spawnTimer=0; savedState=null; trainFlash=0;
   gameState='playing';
+  startMusic();
+}
+
+function retryFromLevel() {
+  if (!savedState) { startGame(); return; }
+  initPlayer();
+  player.level        = savedState.level;
+  player.gunIdx       = savedState.gunIdx;
+  player.dmgMult      = savedState.dmgMult;
+  player.rateMult     = savedState.rateMult;
+  player.spdMult      = savedState.spdMult;
+  player.maxHp        = savedState.maxHp;
+  player.hp           = savedState.maxHp;
+  player.extraBullets = savedState.extraBullets;
+  player.specialMoves = 10;
+  player.trainIdx     = savedState.trainIdx;
+  bullets=[]; zombies=[]; trains=[]; particles=[]; explosions=[]; levelOpts=[];
+  totalKills=0; spawnTimer=0; trainFlash=0;
+  gameState='playing';
+  startMusic();
 }
 
 // ─── ZOMBIE TYPES ──────────────────────────────────────────────────────────
@@ -103,7 +269,6 @@ function spawnZombie() {
   if (spawnTimer>0) return;
   const rate = Math.max(18, 95 - player.level*9);
   spawnTimer = rate;
-
   const count = player.level>=4 ? 1+Math.floor(Math.random()*2) : 1;
   for (let j=0; j<count; j++) {
     const cfg = pickZombieType(player.level);
@@ -128,22 +293,16 @@ function tryFire(now) {
   const effRate = gun.rate / player.rateMult;
   if (now - player.lastFire < effRate) return;
   player.lastFire = now;
-
   const total   = gun.cnt + player.extraBullets;
   const effDmg  = gun.dmg * player.dmgMult;
   const base    = player.angle;
   const muzzleX = player.x + Math.cos(base)*24;
   const muzzleY = player.y + Math.sin(base)*24;
-
   for (let i=0; i<total; i++) {
     let ang;
-    if (gun.spread>0) {
-      ang = base + (Math.random()-0.5)*gun.spread*2;
-    } else if (total>1) {
-      ang = base + (i-(total-1)/2)*0.12;
-    } else {
-      ang = base;
-    }
+    if (gun.spread>0)      { ang = base + (Math.random()-0.5)*gun.spread*2; }
+    else if (total>1)      { ang = base + (i-(total-1)/2)*0.12; }
+    else                   { ang = base; }
     bullets.push({
       x:muzzleX, y:muzzleY,
       vx:Math.cos(ang)*gun.spd, vy:Math.sin(ang)*gun.spd,
@@ -152,7 +311,6 @@ function tryFire(now) {
       alive:true, hits:0
     });
   }
-  // muzzle flash
   for (let i=0; i<6; i++) {
     const a=base+(Math.random()-0.5)*0.9;
     particles.push({ x:muzzleX, y:muzzleY,
@@ -188,6 +346,30 @@ function bloodSplat(x,y,col) {
   }
 }
 
+// ─── SPECIAL MOVE: TRAIN ───────────────────────────────────────────────────
+function activateSpecial() {
+  if (player.specialMoves <= 0 || gameState !== 'playing') return;
+  player.specialMoves--;
+  trainFlash = 30;
+  const def = TRAIN_DEFS[player.trainIdx % TRAIN_DEFS.length];
+  player.trainIdx++;
+  // Random Y position, avoid edges
+  const ty = 60 + Math.random() * (H - 160);
+  // Speed lines (static offsets stored so they don't flicker)
+  const speedLines = [];
+  for (let i = 0; i < 6; i++) speedLines.push(30 + Math.random() * 60);
+  trains.push({
+    x: -def.trainW - 20,
+    y: ty,
+    def,
+    speedLines,
+    alive: true,
+  });
+  ensureAudio();
+  playTrainSFX();
+  shakeTmr = 25; shakeAmt = 10;
+}
+
 // ─── UPDATE ────────────────────────────────────────────────────────────────
 function update(dt) {
   if (gameState!=='playing') return;
@@ -200,12 +382,13 @@ function update(dt) {
   if (keys['d']||keys['arrowright']) dx+=1;
   if (dx&&dy) { dx*=0.707; dy*=0.707; }
   const spd = player.speed*player.spdMult;
-  player.x = Math.max(player.r||22, Math.min(W-(player.r||22), player.x+dx*spd));
-  player.y = Math.max(player.r||22, Math.min(H-(player.r||22), player.y+dy*spd));
+  player.x = Math.max(22, Math.min(W-22, player.x+dx*spd));
+  player.y = Math.max(22, Math.min(H-22, player.y+dy*spd));
   player.angle = Math.atan2(my-player.y, mx-player.x);
 
   if (mdown||keys[' ']) tryFire(Date.now());
   if (player.iframes>0) player.iframes--;
+  if (trainFlash>0) trainFlash--;
 
   // Spawn & move zombies
   spawnZombie();
@@ -217,7 +400,21 @@ function update(dt) {
       player.hp -= 10;
       player.iframes = 40;
       shakeTmr=10; shakeAmt=7;
-      if (player.hp<=0) { player.hp=0; gameState='gameover'; return; }
+      if (player.hp<=0) {
+        player.hp=0;
+        savedState = {
+          level:        player.level,
+          gunIdx:       player.gunIdx,
+          dmgMult:      player.dmgMult,
+          rateMult:     player.rateMult,
+          spdMult:      player.spdMult,
+          maxHp:        player.maxHp,
+          extraBullets: player.extraBullets,
+          trainIdx:     player.trainIdx,
+        };
+        gameState='gameover';
+        return;
+      }
     }
   }
 
@@ -233,8 +430,7 @@ function update(dt) {
       if (Math.hypot(z.x-b.x, z.y-b.y) < b.r+z.r) {
         if (b.explosive) { doExplosion(b.x,b.y,b.expR,b.dmg); b.alive=false; }
         else {
-          z.hp -= b.dmg;
-          bloodSplat(z.x,z.y,z.col);
+          z.hp -= b.dmg; bloodSplat(z.x,z.y,z.col);
           b.hits++;
           if (!b.piercing || b.hits>=3) b.alive=false;
         }
@@ -242,6 +438,30 @@ function update(dt) {
     }
   }
   bullets = bullets.filter(b=>b.alive);
+
+  // Update trains
+  for (const t of trains) {
+    t.x += t.def.speed;
+    // Check zombie collision (bounding box + nose)
+    const tw = t.def.trainW, th = t.def.trainH;
+    for (const z of zombies) {
+      if (z.x > t.x - z.r && z.x < t.x + tw + z.r &&
+          z.y > t.y - z.r && z.y < t.y + th + z.r) {
+        z.hp = -9999;
+        // Big impact particles
+        for (let i=0;i<8;i++) {
+          const a=Math.random()*Math.PI*2;
+          particles.push({ x:z.x, y:z.y,
+            vx:Math.cos(a)*(4+Math.random()*6),
+            vy:Math.sin(a)*(4+Math.random()*6),
+            life:0.7, maxLife:0.7,
+            col:['#FF4500','#FFD700','#fff'][i%3], r:4+Math.random()*5 });
+        }
+      }
+    }
+    if (t.x > W + tw + 20) t.alive = false;
+  }
+  trains = trains.filter(t => t.alive);
 
   // Kill check
   for (const z of zombies) {
@@ -277,7 +497,6 @@ function update(dt) {
 // ─── LEVEL UP ──────────────────────────────────────────────────────────────
 function buildLevelOpts() {
   const pool = [...STAT_UPS];
-  // Add only the very next gun if available
   const nextIdx = player.gunIdx+1;
   if (nextIdx<GUNS.length) {
     const g=GUNS[nextIdx];
@@ -307,6 +526,7 @@ function applyUpgrade(opt) {
       case 'extra': player.extraBullets++; break;
     }
   }
+  player.specialMoves = 10; // restore specials each level
   gameState='playing';
 }
 
@@ -316,11 +536,9 @@ function drawStitch(x,y,angle,iframes) {
   ctx.translate(x,y);
   if (iframes>0 && Math.floor(iframes/5)%2===0) ctx.globalAlpha=0.35;
 
-  // Shadow
   ctx.fillStyle='rgba(0,0,0,0.25)';
   ctx.beginPath(); ctx.ellipse(0,20,18,7,0,0,Math.PI*2); ctx.fill();
 
-  // Ears
   const earData=[[-14,-30,-0.4],[14,-30,0.4]];
   for (const [ex,ey,er] of earData) {
     ctx.fillStyle='#1a50cc';
@@ -331,25 +549,18 @@ function drawStitch(x,y,angle,iframes) {
     ctx.beginPath(); ctx.ellipse(ex-2,ey-5,2,6,er-0.2,0,Math.PI*2); ctx.fill();
   }
 
-  // Body
   ctx.fillStyle='#3388ff';
   ctx.beginPath(); ctx.ellipse(0,5,19,21,0,0,Math.PI*2); ctx.fill();
-
-  // Belly
   ctx.fillStyle='#aaccff';
   ctx.beginPath(); ctx.ellipse(0,9,10,13,0,0,Math.PI*2); ctx.fill();
-
-  // Back spines
   ctx.fillStyle='#1a50cc';
   for (let i=0;i<3;i++) {
     ctx.beginPath(); ctx.ellipse(-4+i*4,-21-i*2,3,7,(i-1)*0.3,0,Math.PI*2); ctx.fill();
   }
 
-  // Head
   ctx.fillStyle='#44aaff';
   ctx.beginPath(); ctx.ellipse(0,-13,16,15,0,0,Math.PI*2); ctx.fill();
 
-  // Eyes
   const pAx=Math.cos(angle)*2.5, pAy=Math.sin(angle)*2.5;
   for (const [ex,ey] of [[-6,-15],[6,-15]]) {
     ctx.fillStyle='white'; ctx.beginPath(); ctx.ellipse(ex,ey,6.5,7.5,-0.1,0,Math.PI*2); ctx.fill();
@@ -357,33 +568,24 @@ function drawStitch(x,y,angle,iframes) {
     ctx.fillStyle='white'; ctx.beginPath(); ctx.ellipse(ex+pAx-1.5,ey+pAy-2,1.5,1.5,0,0,Math.PI*2); ctx.fill();
   }
 
-  // Nose
   ctx.fillStyle='#0d2a88';
   ctx.beginPath(); ctx.ellipse(0,-8,5,3,0,0,Math.PI*2); ctx.fill();
   ctx.fillStyle='rgba(180,200,255,0.3)';
   ctx.beginPath(); ctx.ellipse(-1.5,-8.5,2,1.5,0,0,Math.PI*2); ctx.fill();
-
-  // Mouth (grin)
   ctx.strokeStyle='#0d2a88'; ctx.lineWidth=2;
   ctx.beginPath(); ctx.arc(0,-5,7,0.15,Math.PI-0.15); ctx.stroke();
 
-  // Legs
   ctx.fillStyle='#3388ff';
   ctx.beginPath(); ctx.ellipse(-9,23,6,9,0.2,0,Math.PI*2); ctx.fill();
   ctx.beginPath(); ctx.ellipse(9,23,6,9,-0.2,0,Math.PI*2); ctx.fill();
-
-  // Off-hand arm
   ctx.beginPath(); ctx.ellipse(-22,4,7,5,0.4,0,Math.PI*2); ctx.fill();
 
-  // Gun arm (rotated toward aim)
   ctx.save(); ctx.rotate(angle);
   ctx.fillStyle='#3388ff';
   ctx.beginPath(); ctx.ellipse(19,0,9,5,0,0,Math.PI*2); ctx.fill();
-  // Gun body
   const gun=GUNS[player.gunIdx];
   ctx.fillStyle='#2a2a2a'; ctx.fillRect(18,-4,22,8);
   ctx.fillStyle=gun.col; ctx.fillRect(36,-3,10,6);
-  // Barrel
   ctx.fillStyle='#1a1a1a'; ctx.fillRect(38,-2,14,4);
   ctx.restore();
 
@@ -393,12 +595,8 @@ function drawStitch(x,y,angle,iframes) {
 // ─── DRAW: ZOMBIE ──────────────────────────────────────────────────────────
 function drawZombie(z) {
   ctx.save(); ctx.translate(z.x, z.y);
-
-  // Shadow
   ctx.fillStyle='rgba(0,0,0,0.2)';
   ctx.beginPath(); ctx.ellipse(0,z.r+2,z.r*0.8,z.r*0.3,0,0,Math.PI*2); ctx.fill();
-
-  // Outstretched arms
   ctx.strokeStyle=z.col; ctx.lineWidth=z.r*0.32; ctx.lineCap='round';
   ctx.save(); ctx.rotate(z.moveAngle);
   ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(z.r*1.3,0); ctx.stroke();
@@ -406,32 +604,21 @@ function drawZombie(z) {
   ctx.save(); ctx.rotate(z.moveAngle+Math.PI*0.18);
   ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(-z.r*1.1,0); ctx.stroke();
   ctx.restore();
-
-  // Body
   ctx.fillStyle=z.col;
   ctx.beginPath(); ctx.ellipse(0,4,z.r*0.65,z.r*0.75,0,0,Math.PI*2); ctx.fill();
-
-  // Head
   ctx.beginPath(); ctx.ellipse(0,-z.r*0.52,z.r*0.6,z.r*0.56,0,0,Math.PI*2); ctx.fill();
-
-  // Torn shirt detail
   ctx.strokeStyle='rgba(0,0,0,0.3)'; ctx.lineWidth=1;
   ctx.beginPath(); ctx.moveTo(-z.r*0.3,0); ctx.lineTo(-z.r*0.1,z.r*0.4); ctx.stroke();
-
-  // Red eyes
   ctx.fillStyle='#ff1111';
   ctx.beginPath(); ctx.ellipse(-z.r*0.2,-z.r*0.56,z.r*0.14,z.r*0.14,0,0,Math.PI*2); ctx.fill();
   ctx.beginPath(); ctx.ellipse(z.r*0.2,-z.r*0.56,z.r*0.14,z.r*0.14,0,0,Math.PI*2); ctx.fill();
   ctx.fillStyle='rgba(255,255,255,0.8)';
   ctx.beginPath(); ctx.ellipse(-z.r*0.24,-z.r*0.62,z.r*0.05,z.r*0.05,0,0,Math.PI*2); ctx.fill();
   ctx.beginPath(); ctx.ellipse(z.r*0.16,-z.r*0.62,z.r*0.05,z.r*0.05,0,0,Math.PI*2); ctx.fill();
-
-  // HP bar
   const ratio=Math.max(0,z.hp/z.maxHp);
   ctx.fillStyle='#300'; ctx.fillRect(-z.r,-z.r*1.6,z.r*2,5);
   ctx.fillStyle=ratio>0.6?'#0e0':ratio>0.3?'#ee0':'#e00';
   ctx.fillRect(-z.r,-z.r*1.6,z.r*2*ratio,5);
-
   ctx.restore();
 }
 
@@ -448,10 +635,78 @@ function drawBullet(b) {
     ctx.shadowBlur=10; ctx.shadowColor=b.col;
     ctx.fillStyle=b.col;
     ctx.beginPath(); ctx.arc(b.x,b.y,b.r,0,Math.PI*2); ctx.fill();
-    // Trail
     ctx.globalAlpha=0.35;
     ctx.beginPath(); ctx.arc(b.x-b.vx*2, b.y-b.vy*2, b.r*0.7,0,Math.PI*2); ctx.fill();
   }
+  ctx.restore();
+}
+
+// ─── DRAW: TRAIN ───────────────────────────────────────────────────────────
+function drawTrain(t) {
+  const def = t.def;
+  const x = t.x, y = t.y;
+  const w = def.trainW, h = def.trainH, np = def.nosePt;
+
+  ctx.save();
+
+  // Speed lines (behind train)
+  ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+  ctx.lineWidth = 2;
+  for (let i = 0; i < t.speedLines.length; i++) {
+    const ly = y + h * 0.15 + i * (h * 0.14);
+    const ll = t.speedLines[i];
+    ctx.beginPath(); ctx.moveTo(x - ll, ly); ctx.lineTo(x - 8, ly); ctx.stroke();
+  }
+
+  // Glow
+  ctx.shadowBlur = 18; ctx.shadowColor = def.stripeCol;
+
+  // Body with aerodynamic nose
+  ctx.fillStyle = def.bodyCol;
+  ctx.beginPath();
+  ctx.moveTo(x, y + h * 0.08);
+  ctx.lineTo(x + w - np, y);
+  ctx.quadraticCurveTo(x + w + 10, y + h * 0.5, x + w - np, y + h);
+  ctx.lineTo(x, y + h * 0.92);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.shadowBlur = 0;
+
+  // Colored stripe(s)
+  ctx.fillStyle = def.stripeCol;
+  ctx.fillRect(x, y + h * 0.34, w - np, h * 0.28);
+  // Thin accent stripe
+  ctx.fillStyle = 'rgba(0,0,0,0.15)';
+  ctx.fillRect(x, y + h * 0.34, w - np, 3);
+  ctx.fillRect(x, y + h * 0.34 + h * 0.28 - 3, w - np, 3);
+
+  // Windows
+  const numW = 7;
+  const winH = h * 0.35, winW = 26;
+  const winY = y + h * 0.08;
+  const spaceForWin = (w - np - 20);
+  const winStep = spaceForWin / numW;
+  for (let i = 0; i < numW; i++) {
+    const wx = x + 14 + i * winStep;
+    ctx.fillStyle = def.windowCol;
+    ctx.beginPath(); ctx.roundRect(wx, winY + 2, winW, winH, 3); ctx.fill();
+    ctx.strokeStyle = def.winFrame; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.roundRect(wx, winY + 2, winW, winH, 3); ctx.stroke();
+  }
+
+  // Underbody / chassis
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.fillRect(x, y + h * 0.88, w - np, h * 0.12);
+
+  // Train name label (above)
+  ctx.shadowBlur = 6; ctx.shadowColor = 'black';
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 15px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText(def.name, x + (w - np) / 2, y - 7);
+  ctx.shadowBlur = 0;
+
   ctx.restore();
 }
 
@@ -462,7 +717,6 @@ function drawBackground() {
   ctx.strokeStyle='rgba(40,40,90,0.4)'; ctx.lineWidth=1;
   for (let x=0;x<=W;x+=50) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
   for (let y=0;y<=H;y+=50) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
-  // Vignette
   const vg=ctx.createRadialGradient(W/2,H/2,H*0.3,W/2,H/2,H*0.85);
   vg.addColorStop(0,'transparent'); vg.addColorStop(1,'rgba(0,0,0,0.55)');
   ctx.fillStyle=vg; ctx.fillRect(0,0,W,H);
@@ -470,7 +724,7 @@ function drawBackground() {
 
 // ─── DRAW: HUD ─────────────────────────────────────────────────────────────
 function drawHUD() {
-  // HP
+  // HP bar
   const hpR=player.hp/player.maxHp;
   ctx.fillStyle='rgba(0,0,0,0.65)';
   ctx.beginPath(); ctx.roundRect(10,10,210,26,5); ctx.fill();
@@ -492,11 +746,25 @@ function drawHUD() {
   ctx.fillStyle='white'; ctx.font='13px Arial';
   ctx.fillText(`💀 ${player.kills} / ${player.killsNeeded} 殭屍`,18,57);
 
-  // Level + total
+  // Level + total kills
   ctx.fillStyle='rgba(0,0,0,0.65)';
   ctx.beginPath(); ctx.roundRect(10,70,200,24,5); ctx.fill();
   ctx.fillStyle='#FFD700'; ctx.font='bold 14px Arial';
   ctx.fillText(`⭐ Level ${player.level}   總擊殺: ${totalKills}`,18,87);
+
+  // Special moves
+  const smCol = player.specialMoves > 0 ? '#00ffcc' : '#555';
+  ctx.fillStyle='rgba(0,0,0,0.65)';
+  ctx.beginPath(); ctx.roundRect(10,100,210,24,5); ctx.fill();
+  ctx.strokeStyle = player.specialMoves>0?'#00ffcc':'#444'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.roundRect(10,100,210,24,5); ctx.stroke();
+  ctx.fillStyle = smCol; ctx.font = 'bold 13px Arial';
+  ctx.fillText(`🚂 絕招 [Q]`, 18, 117);
+  // Dots
+  for (let i = 0; i < 10; i++) {
+    ctx.fillStyle = i < player.specialMoves ? '#00ffcc' : '#333';
+    ctx.beginPath(); ctx.arc(115 + i*9, 112, 3.5, 0, Math.PI*2); ctx.fill();
+  }
 
   // Gun info
   const gun=GUNS[player.gunIdx];
@@ -507,11 +775,19 @@ function drawHUD() {
   ctx.fillText(`${gun.icon} ${gun.name}`,W-16,30);
   ctx.textAlign='left';
 
-  // Controls
-  ctx.fillStyle='rgba(255,255,255,0.35)'; ctx.font='11px Arial';
+  // Music toggle
+  ctx.fillStyle='rgba(255,255,255,0.3)'; ctx.font='11px Arial';
   ctx.textAlign='right';
-  ctx.fillText('WASD 移動 ∙ 滑鼠瞄準 ∙ 左鍵/空格 射擊',W-10,H-8);
+  ctx.fillText(`[M] 音樂: ${musicMuted?'關':'開'}`, W-10, H-22);
+  ctx.fillText('WASD 移動 ∙ 滑鼠瞄準 ∙ 左鍵/空格 射擊 ∙ Q 絕招',W-10,H-8);
   ctx.textAlign='left';
+
+  // Train flash overlay
+  if (trainFlash > 0) {
+    const alpha = trainFlash / 30 * 0.25;
+    ctx.fillStyle = `rgba(0,255,200,${alpha})`;
+    ctx.fillRect(0,0,W,H);
+  }
 }
 
 // ─── DRAW: EXPLOSIONS ──────────────────────────────────────────────────────
@@ -544,7 +820,6 @@ function drawParticles() {
 function drawStart() {
   ctx.fillStyle='#07071a'; ctx.fillRect(0,0,W,H);
 
-  // Stars
   ctx.fillStyle='rgba(255,255,255,0.6)';
   for (let i=0;i<80;i++) {
     const sx=(i*137.5)%W, sy=(i*97.3)%H;
@@ -552,7 +827,6 @@ function drawStart() {
     ctx.beginPath(); ctx.arc(sx,sy,sr,0,Math.PI*2); ctx.fill();
   }
 
-  // Title
   ctx.textAlign='center';
   ctx.shadowBlur=20; ctx.shadowColor='#4488ff';
   ctx.fillStyle='#66aaff'; ctx.font='bold 58px Arial';
@@ -561,21 +835,18 @@ function drawStart() {
   ctx.fillText('Stitch vs Zombies', W/2, 158);
   ctx.shadowBlur=0;
 
-  // Draw Stitch
   drawStitch(W/2, 300, -0.5, 0);
 
-  // Instructions
   ctx.fillStyle='rgba(255,255,255,0.85)'; ctx.font='17px Arial';
-  ctx.fillText('WASD / 方向鍵 — 移動', W/2, 410);
-  ctx.fillText('滑鼠瞄準   ∙   左鍵 / 空格 — 射擊', W/2, 436);
-  ctx.fillText('消滅 50 隻殭屍升一級，解鎖更強武器！', W/2, 462);
+  ctx.fillText('WASD / 方向鍵 — 移動', W/2, 405);
+  ctx.fillText('滑鼠瞄準   ∙   左鍵 / 空格 — 射擊', W/2, 429);
+  ctx.fillText('[ Q ] — 絕招：召喚火車碾壓殭屍！每關10次', W/2, 453);
+  ctx.fillText('消滅 30 隻殭屍升一級，解鎖更強武器！', W/2, 477);
 
-  // Weapon preview
   ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.font='13px Arial';
-  ctx.fillText('🔫手槍 → 💥霰彈槍 → ⚡衝鋒槍 → 🌀電漿槍 → 🚀火箭炮', W/2, 488);
+  ctx.fillText('🚅新幹線 ∙ 🚄高鐵 ∙ 🚃動感號 ∙ 🚆復興號', W/2, 498);
 
-  // Start button
-  const bx=W/2-110, by=510;
+  const bx=W/2-110, by=514;
   ctx.fillStyle='#2244bb';
   ctx.beginPath(); ctx.roundRect(bx,by,220,52,12); ctx.fill();
   ctx.strokeStyle='#6688ff'; ctx.lineWidth=2.5;
@@ -589,7 +860,6 @@ function drawStart() {
 function drawLevelUp() {
   ctx.fillStyle='rgba(0,0,15,0.82)'; ctx.fillRect(0,0,W,H);
   ctx.textAlign='center';
-
   ctx.shadowBlur=20; ctx.shadowColor='#FFD700';
   ctx.fillStyle='#FFD700'; ctx.font='bold 46px Arial';
   ctx.fillText(`🎉 Level ${player.level} 升級！`,W/2,95);
@@ -605,26 +875,25 @@ function drawLevelUp() {
     const opt=levelOpts[i];
     const cx=sx+i*(cW+gap), cy=158;
     const hov=mx>=cx&&mx<=cx+cW&&my>=cy&&my<=cy+cH;
-
     ctx.fillStyle=hov?'rgba(70,90,200,0.95)':'rgba(20,25,70,0.9)';
     ctx.strokeStyle=hov?'#aabbff':'#445599';
     ctx.lineWidth=hov?3:2;
     ctx.beginPath(); ctx.roundRect(cx,cy,cW,cH,14); ctx.fill(); ctx.stroke();
-
     ctx.fillStyle=opt.type==='gun'?'#88ffcc':'#FFD700';
     ctx.font='bold 17px Arial';
     ctx.fillText(opt.label, cx+cW/2, cy+55);
-
     ctx.fillStyle='rgba(255,255,255,0.8)'; ctx.font='14px Arial';
-    // wrap on '，'
     const parts=opt.desc.split('，');
     parts.forEach((p,pi)=>ctx.fillText(p+(pi<parts.length-1?'，':''),cx+cW/2,cy+92+pi*22));
-
     if (opt.type==='gun') {
       ctx.fillStyle='#44ffaa'; ctx.font='bold 13px Arial';
       ctx.fillText('[ 新武器解鎖 ]',cx+cW/2,cy+165);
     }
   }
+
+  // Special moves restore notice
+  ctx.fillStyle='rgba(0,255,200,0.7)'; ctx.font='14px Arial';
+  ctx.fillText('🚂 升級後絕招恢復 10 次',W/2,H-30);
   ctx.textAlign='left';
 }
 
@@ -637,17 +906,29 @@ function drawGameOver() {
   ctx.fillText('遊戲結束',W/2,180);
   ctx.shadowBlur=0;
   ctx.fillStyle='#FFD700'; ctx.font='bold 30px Arial';
-  ctx.fillText(`💀 擊殺殭屍：${totalKills} 隻`,W/2,260);
+  ctx.fillText(`💀 擊殺殭屍：${totalKills} 隻`,W/2,255);
   ctx.fillStyle='#aaddff'; ctx.font='bold 24px Arial';
-  ctx.fillText(`⭐ 達到等級：${player.level}`,W/2,300);
+  const lvl = savedState ? savedState.level : 1;
+  ctx.fillText(`⭐ 達到等級：${lvl}`,W/2,295);
 
-  const bx=W/2-130, by=350;
+  // Button 1: Restart from beginning
+  const b1x=W/2-140, b1y=335;
   ctx.fillStyle='#882222';
-  ctx.beginPath(); ctx.roundRect(bx,by,260,56,12); ctx.fill();
+  ctx.beginPath(); ctx.roundRect(b1x,b1y,280,52,12); ctx.fill();
   ctx.strokeStyle='#ff6666'; ctx.lineWidth=2;
-  ctx.beginPath(); ctx.roundRect(bx,by,260,56,12); ctx.stroke();
-  ctx.fillStyle='white'; ctx.font='bold 28px Arial';
-  ctx.fillText('重新開始',W/2,by+39);
+  ctx.beginPath(); ctx.roundRect(b1x,b1y,280,52,12); ctx.stroke();
+  ctx.fillStyle='white'; ctx.font='bold 22px Arial';
+  ctx.fillText('重新開始（第一關）',W/2,b1y+35);
+
+  // Button 2: Retry from current level
+  const b2x=W/2-160, b2y=402;
+  ctx.fillStyle='#1a4488';
+  ctx.beginPath(); ctx.roundRect(b2x,b2y,320,52,12); ctx.fill();
+  ctx.strokeStyle='#66aaff'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.roundRect(b2x,b2y,320,52,12); ctx.stroke();
+  ctx.fillStyle='white'; ctx.font='bold 22px Arial';
+  ctx.fillText(`由第 ${lvl} 關重試（保留強化）`,W/2,b2y+35);
+
   ctx.textAlign='left';
 }
 
@@ -663,6 +944,7 @@ function draw() {
   drawParticles();
   for (const b of bullets) drawBullet(b);
   for (const z of zombies) drawZombie(z);
+  for (const t of trains)  drawTrain(t);
   drawStitch(player.x, player.y, player.angle, player.iframes);
   drawHUD();
 
@@ -700,6 +982,14 @@ document.addEventListener('keydown', e=>{
   const k=e.key.toLowerCase();
   keys[k]=true;
   if (['arrowup','arrowdown','arrowleft','arrowright',' '].includes(k)) e.preventDefault();
+  if (k==='q') activateSpecial();
+  if (k==='m') {
+    musicMuted = !musicMuted;
+    if (!musicMuted) {
+      ensureAudio();
+      if (!musicStarted) { musicStarted=true; schedulerTick(); }
+    }
+  }
 });
 document.addEventListener('keyup', e=>{ keys[e.key.toLowerCase()]=false; });
 
@@ -707,6 +997,7 @@ canvas.addEventListener('mousemove', e=>{
   const r=canvas.getBoundingClientRect();
   mx=e.clientX-r.left; my=e.clientY-r.top;
 });
+
 canvas.addEventListener('mousedown', e=>{
   if (e.button!==0) return;
   mdown=true;
@@ -714,12 +1005,14 @@ canvas.addEventListener('mousedown', e=>{
   mx=e.clientX-r.left; my=e.clientY-r.top;
 
   if (gameState==='start') {
-    // Check start button
-    if (mx>=W/2-110 && mx<=W/2+110 && my>=510 && my<=562) startGame();
+    if (mx>=W/2-110 && mx<=W/2+110 && my>=514 && my<=566) startGame();
     return;
   }
   if (gameState==='gameover') {
-    if (mx>=W/2-130 && mx<=W/2+130 && my>=350 && my<=406) startGame();
+    // Button 1: full restart
+    if (mx>=W/2-140 && mx<=W/2+140 && my>=335 && my<=387) { startGame(); return; }
+    // Button 2: retry from level
+    if (mx>=W/2-160 && mx<=W/2+160 && my>=402 && my<=454) { retryFromLevel(); return; }
     return;
   }
   if (gameState==='levelup') {
