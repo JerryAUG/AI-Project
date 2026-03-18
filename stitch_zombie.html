@@ -48,45 +48,45 @@ let nextNoteAt = 0;
 let musicStarted = false;
 
 const BPM = 126;
-const Q = 60/BPM, E = Q/2, H = Q*2, DQ = Q*1.5;
+const Q = 60/BPM, E = Q/2, HALF = Q*2, DQ = Q*1.5;
 
 // Captain Tsubasa main theme (燃えろ！キャプテン翼) approximation
 const MELODY = [
   // ── Intro ──
   {f:494,d:Q},{f:494,d:Q},{f:494,d:E},{f:440,d:E},{f:392,d:Q},
-  {f:440,d:Q},{f:494,d:Q},{f:587,d:H},
+  {f:440,d:Q},{f:494,d:Q},{f:587,d:HALF},
   {f:494,d:Q},{f:440,d:Q},{f:392,d:Q},{f:440,d:Q},
-  {f:392,d:H},{f:0,d:Q},
+  {f:392,d:HALF},{f:0,d:Q},
   // ── Phrase A ──
   {f:587,d:Q},{f:587,d:Q},{f:587,d:E},{f:494,d:E},{f:440,d:Q},
-  {f:494,d:Q},{f:587,d:Q},{f:659,d:H},
+  {f:494,d:Q},{f:587,d:Q},{f:659,d:HALF},
   {f:587,d:Q},{f:523,d:Q},{f:494,d:Q},{f:523,d:Q},
-  {f:494,d:H},{f:0,d:Q},
+  {f:494,d:HALF},{f:0,d:Q},
   // ── Bridge (high energy) ──
   {f:784,d:Q},{f:784,d:E},{f:740,d:E},{f:659,d:Q},{f:587,d:Q},
-  {f:659,d:Q},{f:740,d:Q},{f:784,d:H},
-  {f:880,d:Q},{f:784,d:E},{f:740,d:E},{f:659,d:H},
+  {f:659,d:Q},{f:740,d:Q},{f:784,d:HALF},
+  {f:880,d:Q},{f:784,d:E},{f:740,d:E},{f:659,d:HALF},
   {f:0,d:Q},
   // ── Rise ──
   {f:494,d:Q},{f:523,d:Q},{f:587,d:Q},{f:659,d:Q},
-  {f:740,d:Q},{f:784,d:Q},{f:880,d:H},
+  {f:740,d:Q},{f:784,d:Q},{f:880,d:HALF},
   {f:784,d:Q},{f:740,d:Q},{f:659,d:Q},{f:587,d:Q},
-  {f:392,d:H},{f:0,d:H},
+  {f:392,d:HALF},{f:0,d:HALF},
   // ── Phrase B repeat ──
   {f:494,d:Q},{f:494,d:Q},{f:494,d:E},{f:440,d:E},{f:392,d:Q},
-  {f:440,d:Q},{f:494,d:Q},{f:587,d:H},
+  {f:440,d:Q},{f:494,d:Q},{f:587,d:HALF},
   {f:523,d:Q},{f:494,d:E},{f:440,d:E},{f:392,d:Q},{f:330,d:Q},
-  {f:392,d:H*2},
+  {f:392,d:HALF*2},
 ];
 
 // Simple bass line (root notes on beats 1&3)
 const BASS = [
-  {f:196,d:H},{f:196,d:H},{f:196,d:H},{f:196,d:H},
-  {f:220,d:H},{f:220,d:H},{f:196,d:H},{f:196,d:H},
-  {f:220,d:H},{f:220,d:H},{f:196,d:H},{f:196,d:H},
-  {f:220,d:H},{f:220,d:H},{f:165,d:H},{f:196,d:H*2},
-  {f:196,d:H},{f:196,d:H},{f:220,d:H},{f:220,d:H},
-  {f:294,d:H},{f:294,d:H},{f:220,d:H},{f:220,d:H*2},
+  {f:196,d:HALF},{f:196,d:HALF},{f:196,d:HALF},{f:196,d:HALF},
+  {f:220,d:HALF},{f:220,d:HALF},{f:196,d:HALF},{f:196,d:HALF},
+  {f:220,d:HALF},{f:220,d:HALF},{f:196,d:HALF},{f:196,d:HALF},
+  {f:220,d:HALF},{f:220,d:HALF},{f:165,d:HALF},{f:196,d:HALF*2},
+  {f:196,d:HALF},{f:196,d:HALF},{f:220,d:HALF},{f:220,d:HALF},
+  {f:294,d:HALF},{f:294,d:HALF},{f:220,d:HALF},{f:220,d:HALF*2},
 ];
 
 function ensureAudio() {
